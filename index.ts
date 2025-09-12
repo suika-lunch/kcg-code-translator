@@ -472,3 +472,15 @@ if (!DISCORD_BOT_TOKEN) {
 }
 
 client.login(DISCORD_BOT_TOKEN);
+
+// koyeb用のWebサーバー
+const port = process.env.PORT || 3000;
+console.log(
+  `Launching Bun HTTP server on port: ${port}, url: http://0.0.0.0:${port} 🚀`,
+);
+Bun.serve({
+  port: port,
+  fetch(_request) {
+    return new Response("Hello from Koyeb");
+  },
+});
