@@ -6,4 +6,4 @@ RUN bun install
 ARG PORT
 EXPOSE ${PORT:-3000}
  
-CMD ["bun", "server.ts"]
+CMD ["bun", "index.ts"]
