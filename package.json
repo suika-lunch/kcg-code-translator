@@ -1,0 +1,22 @@
+{
+  "name": "kcg-code-translator",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "check": "oxlint && tsgo",
+    "format": "prettier . --write",
+    "start": "bun run index.ts"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.79",
+    "discord.js": "^14.22.1",
+    "effect": "^3.17.13"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.21",
+    "@typescript/native-preview": "^7.0.0-dev.20250911.1",
+    "oxlint": "^1.15.0",
+    "prettier": "^3.6.2"
+  }
+}
