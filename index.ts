@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, Message } from "discord.js";
-import { Effect } from "effect";
+import { Effect, Data } from "effect";
 import { Canvas, loadImage, GlobalFonts } from "@napi-rs/canvas";
 import * as path from "path";
 import * as fs from "fs";
@@ -11,37 +11,20 @@ const MAP1_EXPANSION = "eABCDEFGHI";
 const MAP2_EXPANSION = "pJKLMNOPQR";
 
 // デッキコードデコードエラー型
-export type DeckCodeDecodeError =
-  | { readonly type: "emptyCode"; readonly message: string }
-  | {
-      readonly type: "invalidCardId";
-      readonly message: string;
-      readonly invalidId: string;
-    }
-  | {
-      readonly type: "cardNotFound";
-      readonly message: string;
-      readonly notFoundIds: readonly string[];
-    }
-  | {
-      readonly type: "invalidFormat";
-      readonly message: string;
-    }
-  | {
-      readonly type: "unknown";
-      readonly message: string;
-      readonly originalError: unknown;
-    };
-
-// 型ガード関数
-function isDeckCodeDecodeError(error: unknown): error is DeckCodeDecodeError {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in (error as any) &&
-    "type" in (error as any)
-  );
-}
+export class DeckCodeDecodeError extends Data.TaggedError(
+  "DeckCodeDecodeError",
+)<{
+  readonly type:
+    | "emptyCode"
+    | "invalidCardId"
+    | "cardNotFound"
+    | "invalidFormat"
+    | "unknown";
+  readonly message: string;
+  readonly invalidId?: string;
+  readonly notFoundIds?: readonly string[];
+  readonly originalError?: unknown;
+}> {}
 
 /**
  * KCG形式のデッキコードをデコード
@@ -56,26 +39,26 @@ export const decodeKcgDeckCode = (
     try: () => {
       // --- 1. 入力チェックと初期処理 ---
       if (!deckCode || !deckCode.startsWith("KCG-")) {
-        throw {
+        throw new DeckCodeDecodeError({
           type: "invalidFormat",
           message: "デッキコードは'KCG-'で始まる必要があります",
-        } as DeckCodeDecodeError;
+        });
       }
 
       const rawPayloadWithVersion = deckCode.substring(4);
       if (rawPayloadWithVersion.length === 0) {
-        throw {
+        throw new DeckCodeDecodeError({
           type: "invalidFormat",
           message: "デッキコードのペイロードが空です",
-        } as DeckCodeDecodeError;
+        });
       }
 
       for (const char of rawPayloadWithVersion) {
         if (CHAR_MAP.indexOf(char) === -1) {
-          throw {
+          throw new DeckCodeDecodeError({
             type: "invalidFormat",
             message: `デッキコードに無効な文字が含まれています: ${char}`,
-          } as DeckCodeDecodeError;
+          });
         }
       }
 
@@ -178,10 +161,10 @@ export const decodeKcgDeckCode = (
       const decodedEntries: { cardIdPart: string; originalC5Value: number }[] =
         [];
       if (finalNumericString.length % 5 !== 0) {
-        throw {
+        throw new DeckCodeDecodeError({
           type: "invalidFormat",
           message: "最終的な数値文字列の長さが5の倍数ではありません",
-        } as DeckCodeDecodeError;
+        });
       }
 
       for (let i = 0; i < finalNumericString.length; i += 5) {
@@ -259,14 +242,11 @@ export const decodeKcgDeckCode = (
       return deckListOutput;
     },
     catch: (error) => {
-      if (isDeckCodeDecodeError(error)) {
-        return error;
-      }
-      return {
+      return new DeckCodeDecodeError({
         type: "unknown",
         message: "デッキコードのデコード中に予期しないエラーが発生しました",
         originalError: error,
-      };
+      });
     },
   });
 };
@@ -300,11 +280,14 @@ client.on("messageCreate", async (message: Message) => {
       const decodeEffect = decodeKcgDeckCode(content);
       try {
         cardIds = await Effect.runPromise(decodeEffect);
-      } catch (error) {
-        const decodeError = error as DeckCodeDecodeError;
-        await message.reply(
-          `デッキコードのデコードに失敗しました: ${decodeError.message}`,
-        );
+      } catch (error: unknown) {
+        if (error instanceof DeckCodeDecodeError) {
+          await message.reply(
+            `デッキコードのデコードに失敗しました: ${error.message}`,
+          );
+        } else {
+          await message.reply(`予期せぬエラーが発生しました: ${String(error)}`);
+        }
         return;
       }
     } else {
@@ -484,3 +467,22 @@ Bun.serve({
     return new Response("Hello from Koyeb");
   },
 });
+
+// KoyebのWebサーバーを定期的に叩いてスリープを防ぐ
+const KOYEB_URL = process.env.KOYEB_URL || `http://localhost:${port}`;
+const INTERVAL_TIME = 300 * 1000; // 5分ごとにリクエスト (ミリ秒)
+
+setInterval(async () => {
+  try {
+    const response = await fetch(KOYEB_URL);
+    if (response.ok) {
+      console.log(`Koyeb server ping successful: ${KOYEB_URL}`);
+    } else {
+      console.warn(
+        `Koyeb server ping failed with status ${response.status}: ${KOYEB_URL}`,
+      );
+    }
+  } catch (error) {
+    console.error(`Koyeb server ping error: ${error}`);
+  }
+}, INTERVAL_TIME);
