@@ -470,7 +470,7 @@ Bun.serve({
 
 // KoyebのWebサーバーを定期的に叩いてスリープを防ぐ
 const KOYEB_URL = process.env.KOYEB_URL || `http://localhost:${port}`;
-const INTERVAL_TIME = 300 * 1000; // 5分ごとにリクエスト (ミリ秒)
+const INTERVAL_TIME = 180 * 1000; // 3分ごとにリクエスト (ミリ秒)
 
 setInterval(async () => {
   try {
