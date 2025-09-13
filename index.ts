@@ -467,22 +467,3 @@ Bun.serve({
     return new Response("Hello from Koyeb");
   },
 });
-
-// KoyebのWebサーバーを定期的に叩いてスリープを防ぐ
-const KOYEB_URL = process.env.KOYEB_URL || `http://localhost:${port}`;
-const INTERVAL_TIME = 180 * 1000; // 3分ごとにリクエスト (ミリ秒)
-
-setInterval(async () => {
-  try {
-    const response = await fetch(KOYEB_URL);
-    if (response.ok) {
-      console.log(`Koyeb server ping successful: ${KOYEB_URL}`);
-    } else {
-      console.warn(
-        `Koyeb server ping failed with status ${response.status}: ${KOYEB_URL}`,
-      );
-    }
-  } catch (error) {
-    console.error(`Koyeb server ping error: ${error}`);
-  }
-}, INTERVAL_TIME);
