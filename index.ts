@@ -2,7 +2,6 @@ import { Client, GatewayIntentBits, Message } from "discord.js";
 import { Effect, Data } from "effect";
 import { Canvas, loadImage, GlobalFonts } from "@napi-rs/canvas";
 import * as path from "path";
-import * as fs from "fs";
 
 // --- KCGデッキコード用定数 (deckCode.tsからコピー) ---
 const CHAR_MAP =
@@ -62,13 +61,20 @@ export const decodeKcgDeckCode = (
         }
       }
 
-      // --- 2. パディングビット数の計算と削除 ---
+      // --- 2. パディングビット数の計算 ---
       const fifthCharOriginal = rawPayloadWithVersion[0]!;
-      const indexFifthChar = CHAR_MAP.indexOf(fifthCharOriginal) + 1; // 1-64
+      const indexFifthChar = CHAR_MAP.indexOf(fifthCharOriginal) + 1;
 
-      // エンコード時に追加されたパディングビット数を計算
-      // indexFifthCharが8の倍数の場合、charsToRemoveFromPayloadEndは0になる
-      const charsToRemoveFromPayloadEnd = (8 - (indexFifthChar % 8)) % 8;
+      let deckCodeFifthCharQuotient = Math.floor(indexFifthChar / 8);
+      const remainderFifthChar = indexFifthChar % 8;
+
+      let charsToRemoveFromPayloadEnd: number;
+      if (remainderFifthChar === 0) {
+        charsToRemoveFromPayloadEnd = 0;
+      } else {
+        deckCodeFifthCharQuotient++;
+        charsToRemoveFromPayloadEnd = 8 - deckCodeFifthCharQuotient;
+      }
 
       // --- 3. ペイロードを6ビットのバイナリ文字列に変換 ---
       let initialBinaryPayload = "";
@@ -81,11 +87,16 @@ export const decodeKcgDeckCode = (
 
       // --- 4. パディングを削除 ---
       let processedBinaryPayload = initialBinaryPayload;
-      if (charsToRemoveFromPayloadEnd > 0) {
+      if (
+        charsToRemoveFromPayloadEnd > 0 &&
+        initialBinaryPayload.length >= charsToRemoveFromPayloadEnd
+      ) {
         processedBinaryPayload = initialBinaryPayload.substring(
           0,
           initialBinaryPayload.length - charsToRemoveFromPayloadEnd,
         );
+      } else if (charsToRemoveFromPayloadEnd > 0) {
+        processedBinaryPayload = "";
       }
 
       // --- 5. バイナリを数値文字列に変換 ---
@@ -93,20 +104,16 @@ export const decodeKcgDeckCode = (
       for (let i = 0; i + 10 <= processedBinaryPayload.length; i += 10) {
         const tenBitChunk = processedBinaryPayload.substring(i, i + 10);
 
-        // 10ビットの符号付き整数をデコード (2の補数表現)
         let signedDecimalVal: number;
         if (tenBitChunk[0]! === "1") {
-          // 負の数の場合
           const unsignedVal = parseInt(tenBitChunk, 2);
           signedDecimalVal = unsignedVal - 1024; // 1024 = 2^10
         } else {
-          // 正の数の場合
           signedDecimalVal = parseInt(tenBitChunk, 2);
         }
 
-        const nVal = 500 - signedDecimalVal; // 元の数値に戻す
+        const nVal = 500 - signedDecimalVal;
 
-        // 3桁の文字列にフォーマット。1桁、2桁の場合は'X'でパディング
         let formattedNVal: string;
         if (nVal >= 0 && nVal < 10) {
           formattedNVal = "XX" + nVal.toString();
@@ -119,17 +126,35 @@ export const decodeKcgDeckCode = (
       }
 
       // --- 6. 数値文字列を5の倍数に調整し、'X'を'0'に置換 ---
-      let finalNumericString = intermediateString;
       const remainderForFive = intermediateString.length % 5;
+      let adjustedString = intermediateString;
       if (remainderForFive !== 0) {
-        // 末尾の不要な文字を切り捨てる
-        finalNumericString = intermediateString.substring(
-          0,
-          intermediateString.length - remainderForFive,
-        );
+        let charsToActuallyRemove = remainderForFive;
+        let stringAsArray = intermediateString.split("");
+        let removedXCount = 0;
+
+        for (
+          let i = stringAsArray.length - 1;
+          i >= 0 && removedXCount < charsToActuallyRemove;
+          i--
+        ) {
+          if (stringAsArray[i] === "X") {
+            stringAsArray.splice(i, 1);
+            removedXCount++;
+          }
+        }
+
+        const remainingCharsToRemove = charsToActuallyRemove - removedXCount;
+        if (remainingCharsToRemove > 0) {
+          stringAsArray.splice(
+            stringAsArray.length - remainingCharsToRemove,
+            remainingCharsToRemove,
+          );
+        }
+        adjustedString = stringAsArray.join("");
       }
-      // 残った 'X' を '0' に置換 (パディング文字を数値として扱う)
-      finalNumericString = finalNumericString.replace(/X/g, "0");
+
+      const finalNumericString = adjustedString.replace(/X/g, "0");
 
       // --- 7. 数値文字列をカード情報にデコード ---
       const decodedEntries: { cardIdPart: string; originalC5Value: number }[] =
@@ -267,11 +292,11 @@ client.on("messageCreate", async (message: Message) => {
   const content = message.content;
 
   // KCGデッキコードまたは多数のスラッシュを含むメッセージを処理
-  // スラッシュが20個以上ある場合は、KCGデッキコードではないがカードIDのリストとして解釈する
+  // スラッシュが50個以上ある場合は、KCGデッキコードではないがカードIDのリストとして解釈する
   const slashCount = (content.match(/\//g) || []).length;
   const isKcgDeckCode = content.startsWith("KCG-");
 
-  if (slashCount >= 20 || isKcgDeckCode) {
+  if (slashCount >= 50 || isKcgDeckCode) {
     console.log(`Received a relevant message: ${content}`);
 
     let cardIds: string[] = [];
@@ -377,23 +402,25 @@ client.on("messageCreate", async (message: Message) => {
       let x = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_X;
       let y = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_Y;
       let cardsInRow = 0;
-      GlobalFonts.registerFromPath(
-        getAbsolutePath("ShipporiMincho-Bold.ttf"),
-        "ShipporiMincho",
-      );
+      if (!GlobalFonts.has("ShipporiMincho")) {
+        GlobalFonts.registerFromPath(
+          getAbsolutePath("ShipporiMincho-Bold.ttf"),
+          "ShipporiMincho",
+        );
+      }
 
       for (const [cardId, count] of cardCounts.entries()) {
         const cardImagePath = getAbsolutePath(
           path.join("cards", `${cardId}.webp`),
         );
 
-        // カード画像が存在するかチェック
-        if (!fs.existsSync(cardImagePath)) {
+        let cardImage;
+        try {
+          cardImage = await loadImage(cardImagePath);
+        } catch {
           console.warn(`Card image not found: ${cardImagePath}`);
-          continue; // 画像がない場合はスキップ
+          continue;
         }
-
-        const cardImage = await loadImage(cardImagePath);
         ctx.drawImage(
           cardImage,
           x,
