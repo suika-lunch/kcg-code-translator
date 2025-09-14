@@ -62,20 +62,13 @@ export const decodeKcgDeckCode = (
         }
       }
 
-      // --- 2. パディングビット数の計算 ---
+      // --- 2. パディングビット数の計算と削除 ---
       const fifthCharOriginal = rawPayloadWithVersion[0]!;
-      const indexFifthChar = CHAR_MAP.indexOf(fifthCharOriginal) + 1;
+      const indexFifthChar = CHAR_MAP.indexOf(fifthCharOriginal) + 1; // 1-64
 
-      let deckCodeFifthCharQuotient = Math.floor(indexFifthChar / 8);
-      const remainderFifthChar = indexFifthChar % 8;
-
-      let charsToRemoveFromPayloadEnd: number;
-      if (remainderFifthChar === 0) {
-        charsToRemoveFromPayloadEnd = 0;
-      } else {
-        deckCodeFifthCharQuotient++;
-        charsToRemoveFromPayloadEnd = 8 - deckCodeFifthCharQuotient;
-      }
+      // エンコード時に追加されたパディングビット数を計算
+      // indexFifthCharが8の倍数の場合、charsToRemoveFromPayloadEndは0になる
+      const charsToRemoveFromPayloadEnd = (8 - (indexFifthChar % 8)) % 8;
 
       // --- 3. ペイロードを6ビットのバイナリ文字列に変換 ---
       let initialBinaryPayload = "";
@@ -88,16 +81,11 @@ export const decodeKcgDeckCode = (
 
       // --- 4. パディングを削除 ---
       let processedBinaryPayload = initialBinaryPayload;
-      if (
-        charsToRemoveFromPayloadEnd > 0 &&
-        initialBinaryPayload.length >= charsToRemoveFromPayloadEnd
-      ) {
+      if (charsToRemoveFromPayloadEnd > 0) {
         processedBinaryPayload = initialBinaryPayload.substring(
           0,
           initialBinaryPayload.length - charsToRemoveFromPayloadEnd,
         );
-      } else if (charsToRemoveFromPayloadEnd > 0) {
-        processedBinaryPayload = "";
       }
 
       // --- 5. バイナリを数値文字列に変換 ---
@@ -105,16 +93,20 @@ export const decodeKcgDeckCode = (
       for (let i = 0; i + 10 <= processedBinaryPayload.length; i += 10) {
         const tenBitChunk = processedBinaryPayload.substring(i, i + 10);
 
+        // 10ビットの符号付き整数をデコード (2の補数表現)
         let signedDecimalVal: number;
         if (tenBitChunk[0]! === "1") {
+          // 負の数の場合
           const unsignedVal = parseInt(tenBitChunk, 2);
           signedDecimalVal = unsignedVal - 1024; // 1024 = 2^10
         } else {
+          // 正の数の場合
           signedDecimalVal = parseInt(tenBitChunk, 2);
         }
 
-        const nVal = 500 - signedDecimalVal;
+        const nVal = 500 - signedDecimalVal; // 元の数値に戻す
 
+        // 3桁の文字列にフォーマット。1桁、2桁の場合は'X'でパディング
         let formattedNVal: string;
         if (nVal >= 0 && nVal < 10) {
           formattedNVal = "XX" + nVal.toString();
@@ -127,35 +119,17 @@ export const decodeKcgDeckCode = (
       }
 
       // --- 6. 数値文字列を5の倍数に調整し、'X'を'0'に置換 ---
+      let finalNumericString = intermediateString;
       const remainderForFive = intermediateString.length % 5;
-      let adjustedString = intermediateString;
       if (remainderForFive !== 0) {
-        let charsToActuallyRemove = remainderForFive;
-        let stringAsArray = intermediateString.split("");
-        let removedXCount = 0;
-
-        for (
-          let i = stringAsArray.length - 1;
-          i >= 0 && removedXCount < charsToActuallyRemove;
-          i--
-        ) {
-          if (stringAsArray[i] === "X") {
-            stringAsArray.splice(i, 1);
-            removedXCount++;
-          }
-        }
-
-        const remainingCharsToRemove = charsToActuallyRemove - removedXCount;
-        if (remainingCharsToRemove > 0) {
-          stringAsArray.splice(
-            stringAsArray.length - remainingCharsToRemove,
-            remainingCharsToRemove,
-          );
-        }
-        adjustedString = stringAsArray.join("");
+        // 末尾の不要な文字を切り捨てる
+        finalNumericString = intermediateString.substring(
+          0,
+          intermediateString.length - remainderForFive,
+        );
       }
-
-      const finalNumericString = adjustedString.replace(/X/g, "0");
+      // 残った 'X' を '0' に置換 (パディング文字を数値として扱う)
+      finalNumericString = finalNumericString.replace(/X/g, "0");
 
       // --- 7. 数値文字列をカード情報にデコード ---
       const decodedEntries: { cardIdPart: string; originalC5Value: number }[] =
@@ -260,6 +234,29 @@ const client = new Client({
   ],
 });
 
+// デッキ画像生成に関する定数
+const DECK_IMAGE_CONSTANTS = {
+  CANVAS_WIDTH: 3840,
+  CANVAS_PADDING_X: 241,
+  CANVAS_PADDING_Y: 298,
+  GRID_GAP_X: 13,
+  GRID_GAP_Y: 72,
+  TWO_ROWS_THRESHOLD: 20, // sheet2.webpを使う上限
+  THREE_ROWS_THRESHOLD: 30, // sheet.webpを使う上限
+  CANVAS_HEIGHT_TWO_ROWS: 1636, // 2行の場合のキャンバス高さ
+  CANVAS_HEIGHT_THREE_ROWS: 2160, // 3行の場合のキャンバス高さ
+  CARD_WIDTH_SMALL: 212, // カード種類が多い場合のカード幅
+  CARD_WIDTH_LARGE: 324, // カード種類が少ない場合のカード幅
+  CARD_HEIGHT_SMALL: 296, // カード種類が多い場合のカード高さ
+  CARD_HEIGHT_LARGE: 452, // カード種類が少ない場合のカード高さ
+  CARDS_PER_ROW_SMALL: 15, // カード種類が多い場合の1行あたりのカード数
+  CARDS_PER_ROW_LARGE: 10, // カード種類が少ない場合の1行あたりのカード数
+};
+
+// パス関連の共通化ヘルパー
+const getAbsolutePath = (relativePath: string) =>
+  path.join(process.cwd(), relativePath);
+
 client.once("clientReady", () => {
   console.log("Discord Bot is Ready!");
 });
@@ -269,6 +266,8 @@ client.on("messageCreate", async (message: Message) => {
 
   const content = message.content;
 
+  // KCGデッキコードまたは多数のスラッシュを含むメッセージを処理
+  // スラッシュが20個以上ある場合は、KCGデッキコードではないがカードIDのリストとして解釈する
   const slashCount = (content.match(/\//g) || []).length;
   const isKcgDeckCode = content.startsWith("KCG-");
 
@@ -305,56 +304,50 @@ client.on("messageCreate", async (message: Message) => {
       cardCounts.set(cardId, (cardCounts.get(cardId) || 0) + 1);
     }
 
-    // デッキ画像の生成
-    const CANVAS_WIDTH = 3840; // キャンバスの幅
-    const CANVAS_PADDING_X = 241; // キャンバスのXパディング
-    const CANVAS_PADDING_Y = 298; // キャンバスのYパディング
-    const GRID_GAP_X = 13; // グリッドのX間隔
-    const GRID_GAP_Y = 72; // グリッドのY間隔
-    const TWO_ROWS_THRESHOLD = 20; // sheet2.webpを使う上限
-    const THREE_ROWS_THRESHOLD = 30; // sheet.webpを使う上限
-
     /**
      * カード種類の数に基づいてキャンバス高さを計算
      */
     const calculateCanvasHeight = (cardCount: number): number => {
-      if (cardCount <= TWO_ROWS_THRESHOLD) {
-        return 1636;
+      if (cardCount <= DECK_IMAGE_CONSTANTS.TWO_ROWS_THRESHOLD) {
+        return DECK_IMAGE_CONSTANTS.CANVAS_HEIGHT_TWO_ROWS;
       }
-      return 2160;
+      return DECK_IMAGE_CONSTANTS.CANVAS_HEIGHT_THREE_ROWS;
     };
 
     /**
      * カード種類の数に基づいてカード幅を計算
      */
     const calculateCardWidth = (cardCount: number): number => {
-      if (cardCount <= THREE_ROWS_THRESHOLD) return 324;
-      return 212;
+      if (cardCount <= DECK_IMAGE_CONSTANTS.THREE_ROWS_THRESHOLD)
+        return DECK_IMAGE_CONSTANTS.CARD_WIDTH_LARGE;
+      return DECK_IMAGE_CONSTANTS.CARD_WIDTH_SMALL;
     };
 
     /**
      * カード種類の数に基づいてカード高さを計算
      */
     const calculateCardHeight = (cardCount: number): number => {
-      if (cardCount <= THREE_ROWS_THRESHOLD) return 452;
-      return 296;
+      if (cardCount <= DECK_IMAGE_CONSTANTS.THREE_ROWS_THRESHOLD)
+        return DECK_IMAGE_CONSTANTS.CARD_HEIGHT_LARGE;
+      return DECK_IMAGE_CONSTANTS.CARD_HEIGHT_SMALL;
     };
 
     /**
      * カード種類の数に基づいて行あたりのカード数を計算
      */
     const cardsPerRow = (cardCount: number): number => {
-      if (cardCount <= THREE_ROWS_THRESHOLD) return 10;
-      return 15;
+      if (cardCount <= DECK_IMAGE_CONSTANTS.THREE_ROWS_THRESHOLD)
+        return DECK_IMAGE_CONSTANTS.CARDS_PER_ROW_LARGE;
+      return DECK_IMAGE_CONSTANTS.CARDS_PER_ROW_SMALL;
     };
 
     /**
      * カード種類の数に基づいて背景画像を返す
      */
     const getBackgroundImage = (cardCount: number): string => {
-      if (cardCount <= TWO_ROWS_THRESHOLD) {
+      if (cardCount <= DECK_IMAGE_CONSTANTS.TWO_ROWS_THRESHOLD) {
         return "sheet2.webp";
-      } else if (cardCount <= THREE_ROWS_THRESHOLD) {
+      } else if (cardCount <= DECK_IMAGE_CONSTANTS.THREE_ROWS_THRESHOLD) {
         return "sheet.webp";
       } else {
         return "sheet_nogrid.webp";
@@ -362,15 +355,14 @@ client.on("messageCreate", async (message: Message) => {
     };
 
     const canvas = new Canvas(
-      CANVAS_WIDTH,
+      DECK_IMAGE_CONSTANTS.CANVAS_WIDTH,
       calculateCanvasHeight(cardCounts.size),
     );
     const ctx = canvas.getContext("2d");
 
     try {
       // 背景画像の読み込みと描画
-      const backgroundPath = path.join(
-        process.cwd(),
+      const backgroundPath = getAbsolutePath(
         getBackgroundImage(cardCounts.size),
       );
       const backgroundImage = await loadImage(backgroundPath);
@@ -378,23 +370,21 @@ client.on("messageCreate", async (message: Message) => {
         backgroundImage,
         0,
         0,
-        CANVAS_WIDTH,
+        DECK_IMAGE_CONSTANTS.CANVAS_WIDTH,
         calculateCanvasHeight(cardCounts.size),
       );
 
-      let x = CANVAS_PADDING_X;
-      let y = CANVAS_PADDING_Y;
+      let x = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_X;
+      let y = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_Y;
       let cardsInRow = 0;
       GlobalFonts.registerFromPath(
-        path.join(process.cwd(), "ShipporiMincho-Bold.ttf"),
+        getAbsolutePath("ShipporiMincho-Bold.ttf"),
         "ShipporiMincho",
       );
 
       for (const [cardId, count] of cardCounts.entries()) {
-        const cardImagePath = path.join(
-          process.cwd(),
-          "cards",
-          `${cardId}.webp`,
+        const cardImagePath = getAbsolutePath(
+          path.join("cards", `${cardId}.webp`),
         );
 
         // カード画像が存在するかチェック
@@ -421,12 +411,15 @@ client.on("messageCreate", async (message: Message) => {
           y + calculateCardHeight(cardCounts.size) + 50,
         );
 
-        x += calculateCardWidth(cardCounts.size) + GRID_GAP_X;
+        x +=
+          calculateCardWidth(cardCounts.size) + DECK_IMAGE_CONSTANTS.GRID_GAP_X;
         cardsInRow++;
 
         if (cardsInRow >= cardsPerRow(cardCounts.size)) {
-          x = CANVAS_PADDING_X;
-          y += calculateCardHeight(cardCounts.size) + GRID_GAP_Y;
+          x = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_X;
+          y +=
+            calculateCardHeight(cardCounts.size) +
+            DECK_IMAGE_CONSTANTS.GRID_GAP_Y;
           cardsInRow = 0;
         }
       }
