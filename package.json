@@ -9,13 +9,13 @@
     "start": "bun run index.ts"
   },
   "dependencies": {
-    "@napi-rs/canvas": "^0.1.79",
+    "@napi-rs/canvas": "^0.1.80",
     "discord.js": "^14.22.1",
     "effect": "^3.17.13"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.21",
-    "@typescript/native-preview": "^7.0.0-dev.20250912.1",
+    "@types/bun": "^1.2.22",
+    "@typescript/native-preview": "^7.0.0-dev.20250914.1",
     "oxlint": "^1.15.0",
     "prettier": "^3.6.2"
   }
