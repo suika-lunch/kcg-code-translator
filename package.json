@@ -6,7 +6,7 @@
   "scripts": {
     "check": "oxlint && tsgo",
     "format": "prettier . --write",
-    "start": "bun run index.ts"
+    "start": "bun -b tsdown && bun dist/index.js"
   },
   "dependencies": {
     "@napi-rs/canvas": "^0.1.80"

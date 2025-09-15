@@ -4,7 +4,7 @@ COPY . .
 RUN bun install
 RUN bun tsdown
  
-ARG PORT
-EXPOSE ${PORT:-3000}
+ARG PORT=3000
+EXPOSE $PORT
  
-CMD ["bun", "dist/index.js"]
+CMD ["bun", "start"]
