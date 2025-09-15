@@ -266,16 +266,16 @@ const DECK_IMAGE_CONSTANTS = {
   CANVAS_PADDING_Y: 298,
   GRID_GAP_X: 13,
   GRID_GAP_Y: 72,
-  TWO_ROWS_THRESHOLD: 20, // sheet2.webpを使う上限
-  THREE_ROWS_THRESHOLD: 30, // sheet.webpを使う上限
+  TWO_ROWS_THRESHOLD: 20, // sheet2.webpを使うカード種類上限
+  THREE_ROWS_THRESHOLD: 30, // sheet.webpを使うカード種類上限
   CANVAS_HEIGHT_TWO_ROWS: 1636, // 2行の場合のキャンバス高さ
   CANVAS_HEIGHT_THREE_ROWS: 2160, // 3行の場合のキャンバス高さ
-  CARD_WIDTH_SMALL: 212, // カード種類が多い場合のカード幅
-  CARD_WIDTH_LARGE: 324, // カード種類が少ない場合のカード幅
-  CARD_HEIGHT_SMALL: 296, // カード種類が多い場合のカード高さ
-  CARD_HEIGHT_LARGE: 452, // カード種類が少ない場合のカード高さ
-  CARDS_PER_ROW_SMALL: 15, // カード種類が多い場合の1行あたりのカード数
-  CARDS_PER_ROW_LARGE: 10, // カード種類が少ない場合の1行あたりのカード数
+  CARD_WIDTH_SMALL: 212, // 30種を超える場合のカード幅
+  CARD_WIDTH_LARGE: 324, // 30種を超えない場合のカード幅
+  CARD_HEIGHT_SMALL: 296, // 30種を超える場合のカード高さ
+  CARD_HEIGHT_LARGE: 452, // 30種を超えない場合のカード高さ
+  CARDS_PER_ROW_SMALL: 15, // 30種を超える場合の1行あたりのカード数
+  CARDS_PER_ROW_LARGE: 10, // 30種を超えない場合の1行あたりのカード数
 };
 
 // パス関連の共通化ヘルパー
@@ -283,6 +283,10 @@ const getAbsolutePath = (relativePath: string) =>
   path.join(process.cwd(), relativePath);
 
 client.once("clientReady", () => {
+  GlobalFonts.registerFromPath(
+    getAbsolutePath("ShipporiMincho-Bold.ttf"),
+    "ShipporiMincho",
+  );
   console.log("Discord Bot is Ready!");
 });
 
@@ -402,12 +406,6 @@ client.on("messageCreate", async (message: Message) => {
       let x = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_X;
       let y = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_Y;
       let cardsInRow = 0;
-      if (!GlobalFonts.has("ShipporiMincho")) {
-        GlobalFonts.registerFromPath(
-          getAbsolutePath("ShipporiMincho-Bold.ttf"),
-          "ShipporiMincho",
-        );
-      }
 
       for (const [cardId, count] of cardCounts.entries()) {
         const cardImagePath = getAbsolutePath(
@@ -418,8 +416,10 @@ client.on("messageCreate", async (message: Message) => {
         try {
           cardImage = await loadImage(cardImagePath);
         } catch {
-          console.warn(`Card image not found: ${cardImagePath}`);
-          continue;
+          console.warn(
+            `Card image not found: ${cardImagePath}. Using placeholder.`,
+          );
+          cardImage = await loadImage(getAbsolutePath("placeholder.webp"));
         }
         ctx.drawImage(
           cardImage,
