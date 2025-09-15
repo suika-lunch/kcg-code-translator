@@ -416,8 +416,10 @@ client.on("messageCreate", async (message: Message) => {
         try {
           cardImage = await loadImage(cardImagePath);
         } catch {
-          console.warn(`Card image not found: ${cardImagePath}`);
-          continue;
+          console.warn(
+            `Card image not found: ${cardImagePath}. Using placeholder.`,
+          );
+          cardImage = await loadImage(getAbsolutePath("placeholder.webp"));
         }
         ctx.drawImage(
           cardImage,
