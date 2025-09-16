@@ -403,9 +403,26 @@ client.on("messageCreate", async (message: Message) => {
         calculateCanvasHeight(cardCounts.size),
       );
 
+      // カードの合計枚数を計算
+      const totalCardCount = Array.from(cardCounts.values()).reduce(
+        (sum, count) => sum + count,
+        0,
+      );
+
+      // 合計枚数テキストの描画
+      ctx.fillStyle = "#353100"; // 文字色を調整
+      ctx.font = "bold 128px ShipporiMincho"; // フォントサイズを調整
+      ctx.textAlign = "center"; // 中央揃え
+
+      const totalCountText = `合計枚数: ${totalCardCount}枚`;
+
+      ctx.fillText(totalCountText, canvas.width / 2, 240);
+
+      // 各カードの画像と枚数の描画
       let x = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_X;
       let y = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_Y;
       let cardsInRow = 0;
+      ctx.font = "bold 36px ShipporiMincho";
 
       for (const [cardId, count] of cardCounts.entries()) {
         const cardImagePath = getAbsolutePath(
@@ -430,11 +447,9 @@ client.on("messageCreate", async (message: Message) => {
         );
 
         // カード枚数の表示
-        ctx.fillStyle = "black";
-        ctx.font = "bold 36px ShipporiMincho";
         ctx.fillText(
           `${count}`,
-          x + calculateCardWidth(cardCounts.size) * 0.46,
+          x + calculateCardWidth(cardCounts.size) / 2,
           y + calculateCardHeight(cardCounts.size) + 50,
         );
 

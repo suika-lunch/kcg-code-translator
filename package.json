@@ -16,7 +16,7 @@
   "devDependencies": {
     "@types/bun": "^1.2.22",
     "@typescript/native-preview": "^7.0.0-dev.20250916.1",
-    "oxlint": "^1.15.0",
+    "oxlint": "^1.16.0",
     "prettier": "^3.6.2"
   }
 }
