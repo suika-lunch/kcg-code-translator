@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "check": "oxlint && tsgo",
-    "format": "prettier . --write",
+    "format": "prettier . --write --experimental-cli",
     "start": "bun run index.ts"
   },
   "dependencies": {
@@ -15,7 +15,7 @@
   },
   "devDependencies": {
     "@types/bun": "^1.2.22",
-    "@typescript/native-preview": "^7.0.0-dev.20250914.1",
+    "@typescript/native-preview": "^7.0.0-dev.20250915.1",
     "oxlint": "^1.15.0",
     "prettier": "^3.6.2"
   }
