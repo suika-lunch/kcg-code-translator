@@ -463,6 +463,16 @@ client.on("messageCreate", async (message: Message) => {
       );
     }
   }
+
+  // 隠し画像をリプライ
+  const clodsireCount = (content.match(/ン/g) || []).length;
+  if (clodsireCount >= 10) {
+    try {
+      await message.reply({ files: [getAbsolutePath("secret.webp")] });
+    } catch (error) {
+      console.error("Error replying with secret.webp:", error);
+    }
+  }
 });
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
