@@ -1,5 +1,4 @@
 import { Client, GatewayIntentBits, Message } from "discord.js";
-import { Effect, Data } from "effect";
 import { Canvas, loadImage, GlobalFonts, Image } from "@napi-rs/canvas";
 import * as path from "path";
 
@@ -8,22 +7,6 @@ const CHAR_MAP =
   "AIQYgow5BJRZhpx6CKSaiqy7DLTbjrz8EMUcks19FNVdlt2!GOWemu3?HPXfnv4/";
 const MAP1_EXPANSION = "eABCDEFGHI";
 const MAP2_EXPANSION = "pJKLMNOPQR";
-
-// デッキコードデコードエラー型
-export class DeckCodeDecodeError extends Data.TaggedError(
-  "DeckCodeDecodeError",
-)<{
-  readonly type:
-    | "emptyCode"
-    | "invalidCardId"
-    | "cardNotFound"
-    | "invalidFormat"
-    | "unknown";
-  readonly message: string;
-  readonly invalidId?: string;
-  readonly notFoundIds?: readonly string[];
-  readonly originalError?: unknown;
-}> {}
 
 // 画像ロードを簡易キャッシュ
 const imageCache = new Map<string, Image>();
@@ -47,223 +30,197 @@ async function loadCardImage(cardId: string) {
  * @returns デコードされたカードIDの配列
  * @note 無効なカードデータ（範囲外のインデックスや値）は警告なくスキップされます
  */
-export const decodeKcgDeckCode = (
-  deckCode: string,
-): Effect.Effect<string[], DeckCodeDecodeError> => {
-  return Effect.try<string[], DeckCodeDecodeError>({
-    try: () => {
-      // --- 1. 入力チェックと初期処理 ---
-      if (!deckCode || !deckCode.startsWith("KCG-")) {
-        throw new DeckCodeDecodeError({
-          type: "invalidFormat",
-          message: "デッキコードは'KCG-'で始まる必要があります",
-        });
+export const decodeKcgDeckCode = (deckCode: string): string[] => {
+  // --- 1. 入力チェックと初期処理 ---
+  if (!deckCode || !deckCode.startsWith("KCG-")) {
+    throw new Error("デッキコードは'KCG-'で始まる必要があります");
+  }
+
+  const rawPayloadWithVersion = deckCode.substring(4);
+  if (rawPayloadWithVersion.length === 0) {
+    throw new Error("デッキコードのペイロードが空です");
+  }
+
+  for (const char of rawPayloadWithVersion) {
+    if (CHAR_MAP.indexOf(char) === -1) {
+      throw new Error(`デッキコードに無効な文字が含まれています: ${char}`);
+    }
+  }
+
+  // --- 2. パディングビット数の計算 ---
+  const fifthCharOriginal = rawPayloadWithVersion[0]!;
+  const indexFifthChar = CHAR_MAP.indexOf(fifthCharOriginal) + 1;
+
+  let deckCodeFifthCharQuotient = Math.floor(indexFifthChar / 8);
+  const remainderFifthChar = indexFifthChar % 8;
+
+  let charsToRemoveFromPayloadEnd: number;
+  if (remainderFifthChar === 0) {
+    charsToRemoveFromPayloadEnd = 0;
+  } else {
+    deckCodeFifthCharQuotient++;
+    charsToRemoveFromPayloadEnd = 8 - deckCodeFifthCharQuotient;
+  }
+
+  // --- 3. ペイロードを6ビットのバイナリ文字列に変換 ---
+  let initialBinaryPayload = "";
+  const payload = rawPayloadWithVersion.substring(1);
+  for (let i = 0; i < payload.length; i++) {
+    const char = payload[i]!;
+    const charIndex = CHAR_MAP.indexOf(char);
+    initialBinaryPayload += charIndex.toString(2).padStart(6, "0");
+  }
+
+  // --- 4. パディングを削除 ---
+  let processedBinaryPayload = initialBinaryPayload;
+  if (
+    charsToRemoveFromPayloadEnd > 0 &&
+    initialBinaryPayload.length >= charsToRemoveFromPayloadEnd
+  ) {
+    processedBinaryPayload = initialBinaryPayload.substring(
+      0,
+      initialBinaryPayload.length - charsToRemoveFromPayloadEnd,
+    );
+  } else if (charsToRemoveFromPayloadEnd > 0) {
+    processedBinaryPayload = "";
+  }
+
+  // --- 5. バイナリを数値文字列に変換 ---
+  let intermediateString = "";
+  for (let i = 0; i + 10 <= processedBinaryPayload.length; i += 10) {
+    const tenBitChunk = processedBinaryPayload.substring(i, i + 10);
+
+    let signedDecimalVal: number;
+    if (tenBitChunk[0]! === "1") {
+      const unsignedVal = parseInt(tenBitChunk, 2);
+      signedDecimalVal = unsignedVal - 1024; // 1024 = 2^10
+    } else {
+      signedDecimalVal = parseInt(tenBitChunk, 2);
+    }
+
+    const nVal = 500 - signedDecimalVal;
+
+    let formattedNVal: string;
+    if (nVal >= 0 && nVal < 10) {
+      formattedNVal = "XX" + nVal.toString();
+    } else if (nVal >= 10 && nVal < 100) {
+      formattedNVal = "X" + nVal.toString();
+    } else {
+      formattedNVal = nVal.toString();
+    }
+    intermediateString += formattedNVal;
+  }
+
+  // --- 6. 数値文字列を5の倍数に調整し、'X'を'0'に置換 ---
+  const remainderForFive = intermediateString.length % 5;
+  let adjustedString = intermediateString;
+  if (remainderForFive !== 0) {
+    let charsToActuallyRemove = remainderForFive;
+    let stringAsArray = intermediateString.split("");
+    let removedXCount = 0;
+
+    for (
+      let i = stringAsArray.length - 1;
+      i >= 0 && removedXCount < charsToActuallyRemove;
+      i--
+    ) {
+      if (stringAsArray[i] === "X") {
+        stringAsArray.splice(i, 1);
+        removedXCount++;
       }
+    }
 
-      const rawPayloadWithVersion = deckCode.substring(4);
-      if (rawPayloadWithVersion.length === 0) {
-        throw new DeckCodeDecodeError({
-          type: "invalidFormat",
-          message: "デッキコードのペイロードが空です",
-        });
-      }
+    const remainingCharsToRemove = charsToActuallyRemove - removedXCount;
+    if (remainingCharsToRemove > 0) {
+      stringAsArray.splice(
+        stringAsArray.length - remainingCharsToRemove,
+        remainingCharsToRemove,
+      );
+    }
+    adjustedString = stringAsArray.join("");
+  }
 
-      for (const char of rawPayloadWithVersion) {
-        if (CHAR_MAP.indexOf(char) === -1) {
-          throw new DeckCodeDecodeError({
-            type: "invalidFormat",
-            message: `デッキコードに無効な文字が含まれています: ${char}`,
-          });
-        }
-      }
+  const finalNumericString = adjustedString.replace(/X/g, "0");
 
-      // --- 2. パディングビット数の計算 ---
-      const fifthCharOriginal = rawPayloadWithVersion[0]!;
-      const indexFifthChar = CHAR_MAP.indexOf(fifthCharOriginal) + 1;
+  // --- 7. 数値文字列をカード情報にデコード ---
+  const decodedEntries: { cardIdPart: string; originalC5Value: number }[] = [];
+  if (finalNumericString.length % 5 !== 0) {
+    throw new Error("最終的な数値文字列の長さが5の倍数ではありません");
+  }
 
-      let deckCodeFifthCharQuotient = Math.floor(indexFifthChar / 8);
-      const remainderFifthChar = indexFifthChar % 8;
+  for (let i = 0; i < finalNumericString.length; i += 5) {
+    const fiveDigitChunk = finalNumericString.substring(i, i + 5);
 
-      let charsToRemoveFromPayloadEnd: number;
-      if (remainderFifthChar === 0) {
-        charsToRemoveFromPayloadEnd = 0;
-      } else {
-        deckCodeFifthCharQuotient++;
-        charsToRemoveFromPayloadEnd = 8 - deckCodeFifthCharQuotient;
-      }
+    const c1 = parseInt(fiveDigitChunk[0]!, 10);
+    const c2 = parseInt(fiveDigitChunk[1]!, 10);
+    const c3 = parseInt(fiveDigitChunk[2]!, 10);
+    const c4 = parseInt(fiveDigitChunk[3]!, 10);
+    const c5 = parseInt(fiveDigitChunk[4]!, 10);
 
-      // --- 3. ペイロードを6ビットのバイナリ文字列に変換 ---
-      let initialBinaryPayload = "";
-      const payload = rawPayloadWithVersion.substring(1);
-      for (let i = 0; i < payload.length; i++) {
-        const char = payload[i]!;
-        const charIndex = CHAR_MAP.indexOf(char);
-        initialBinaryPayload += charIndex.toString(2).padStart(6, "0");
-      }
+    let expansionMap: string;
+    if (c5 >= 1 && c5 <= 4) {
+      expansionMap = MAP1_EXPANSION;
+    } else if (c5 >= 6 && c5 <= 9) {
+      expansionMap = MAP2_EXPANSION;
+    } else {
+      // 無効なC5値の場合はスキップ
+      continue;
+    }
 
-      // --- 4. パディングを削除 ---
-      let processedBinaryPayload = initialBinaryPayload;
-      if (
-        charsToRemoveFromPayloadEnd > 0 &&
-        initialBinaryPayload.length >= charsToRemoveFromPayloadEnd
-      ) {
-        processedBinaryPayload = initialBinaryPayload.substring(
-          0,
-          initialBinaryPayload.length - charsToRemoveFromPayloadEnd,
-        );
-      } else if (charsToRemoveFromPayloadEnd > 0) {
-        processedBinaryPayload = "";
-      }
+    if (c1 >= expansionMap.length) {
+      // 無効なC1インデックスの場合はスキップ
+      continue;
+    }
+    const selectedCharFromMap = expansionMap[c1]!;
 
-      // --- 5. バイナリを数値文字列に変換 ---
-      let intermediateString = "";
-      for (let i = 0; i + 10 <= processedBinaryPayload.length; i += 10) {
-        const tenBitChunk = processedBinaryPayload.substring(i, i + 10);
+    let expansion: string;
+    if (selectedCharFromMap === "e") {
+      expansion = "ex";
+    } else if (selectedCharFromMap === "p") {
+      expansion = "prm";
+    } else {
+      expansion = selectedCharFromMap;
+    }
 
-        let signedDecimalVal: number;
-        if (tenBitChunk[0]! === "1") {
-          const unsignedVal = parseInt(tenBitChunk, 2);
-          signedDecimalVal = unsignedVal - 1024; // 1024 = 2^10
-        } else {
-          signedDecimalVal = parseInt(tenBitChunk, 2);
-        }
+    let type: string;
+    switch (c2) {
+      case 1:
+        type = "A";
+        break;
+      case 2:
+        type = "S";
+        break;
+      case 3:
+        type = "M";
+        break;
+      case 4:
+        type = "D";
+        break;
+      default:
+        // 無効なC2値の場合はスキップ
+        continue;
+    }
 
-        const nVal = 500 - signedDecimalVal;
+    const numberPartInt = c3 * 10 + c4;
+    if (numberPartInt < 1 || numberPartInt > 50) {
+      // 無効な番号の場合はスキップ
+      continue;
+    }
 
-        let formattedNVal: string;
-        if (nVal >= 0 && nVal < 10) {
-          formattedNVal = "XX" + nVal.toString();
-        } else if (nVal >= 10 && nVal < 100) {
-          formattedNVal = "X" + nVal.toString();
-        } else {
-          formattedNVal = nVal.toString();
-        }
-        intermediateString += formattedNVal;
-      }
+    const cardIdPart = `${expansion}${type}-${numberPartInt}`;
+    decodedEntries.push({ cardIdPart, originalC5Value: c5 });
+  }
 
-      // --- 6. 数値文字列を5の倍数に調整し、'X'を'0'に置換 ---
-      const remainderForFive = intermediateString.length % 5;
-      let adjustedString = intermediateString;
-      if (remainderForFive !== 0) {
-        let charsToActuallyRemove = remainderForFive;
-        let stringAsArray = intermediateString.split("");
-        let removedXCount = 0;
+  // --- 8. 最終的なデッキデータ文字列を生成 ---
+  const deckListOutput: string[] = [];
+  for (const entry of decodedEntries) {
+    const repeatCount = entry.originalC5Value % 5;
+    for (let r = 0; r < repeatCount; r++) {
+      deckListOutput.push(entry.cardIdPart);
+    }
+  }
 
-        for (
-          let i = stringAsArray.length - 1;
-          i >= 0 && removedXCount < charsToActuallyRemove;
-          i--
-        ) {
-          if (stringAsArray[i] === "X") {
-            stringAsArray.splice(i, 1);
-            removedXCount++;
-          }
-        }
-
-        const remainingCharsToRemove = charsToActuallyRemove - removedXCount;
-        if (remainingCharsToRemove > 0) {
-          stringAsArray.splice(
-            stringAsArray.length - remainingCharsToRemove,
-            remainingCharsToRemove,
-          );
-        }
-        adjustedString = stringAsArray.join("");
-      }
-
-      const finalNumericString = adjustedString.replace(/X/g, "0");
-
-      // --- 7. 数値文字列をカード情報にデコード ---
-      const decodedEntries: { cardIdPart: string; originalC5Value: number }[] =
-        [];
-      if (finalNumericString.length % 5 !== 0) {
-        throw new DeckCodeDecodeError({
-          type: "invalidFormat",
-          message: "最終的な数値文字列の長さが5の倍数ではありません",
-        });
-      }
-
-      for (let i = 0; i < finalNumericString.length; i += 5) {
-        const fiveDigitChunk = finalNumericString.substring(i, i + 5);
-
-        const c1 = parseInt(fiveDigitChunk[0]!, 10);
-        const c2 = parseInt(fiveDigitChunk[1]!, 10);
-        const c3 = parseInt(fiveDigitChunk[2]!, 10);
-        const c4 = parseInt(fiveDigitChunk[3]!, 10);
-        const c5 = parseInt(fiveDigitChunk[4]!, 10);
-
-        let expansionMap: string;
-        if (c5 >= 1 && c5 <= 4) {
-          expansionMap = MAP1_EXPANSION;
-        } else if (c5 >= 6 && c5 <= 9) {
-          expansionMap = MAP2_EXPANSION;
-        } else {
-          // 無効なC5値の場合はスキップ
-          continue;
-        }
-
-        if (c1 >= expansionMap.length) {
-          // 無効なC1インデックスの場合はスキップ
-          continue;
-        }
-        const selectedCharFromMap = expansionMap[c1]!;
-
-        let expansion: string;
-        if (selectedCharFromMap === "e") {
-          expansion = "ex";
-        } else if (selectedCharFromMap === "p") {
-          expansion = "prm";
-        } else {
-          expansion = selectedCharFromMap;
-        }
-
-        let type: string;
-        switch (c2) {
-          case 1:
-            type = "A";
-            break;
-          case 2:
-            type = "S";
-            break;
-          case 3:
-            type = "M";
-            break;
-          case 4:
-            type = "D";
-            break;
-          default:
-            // 無効なC2値の場合はスキップ
-            continue;
-        }
-
-        const numberPartInt = c3 * 10 + c4;
-        if (numberPartInt < 1 || numberPartInt > 50) {
-          // 無効な番号の場合はスキップ
-          continue;
-        }
-
-        const cardIdPart = `${expansion}${type}-${numberPartInt}`;
-        decodedEntries.push({ cardIdPart, originalC5Value: c5 });
-      }
-
-      // --- 8. 最終的なデッキデータ文字列を生成 ---
-      const deckListOutput: string[] = [];
-      for (const entry of decodedEntries) {
-        const repeatCount = entry.originalC5Value % 5;
-        for (let r = 0; r < repeatCount; r++) {
-          deckListOutput.push(entry.cardIdPart);
-        }
-      }
-
-      return deckListOutput;
-    },
-    catch: (error) => {
-      return new DeckCodeDecodeError({
-        type: "unknown",
-        message: "デッキコードのデコード中に予期しないエラーが発生しました",
-        originalError: error,
-      });
-    },
-  });
+  return deckListOutput;
 };
 
 // --- Discordボットのロジック ---
@@ -321,11 +278,10 @@ client.on("messageCreate", async (message: Message) => {
 
     let cardIds: string[] = [];
     if (isKcgDeckCode) {
-      const decodeEffect = decodeKcgDeckCode(content);
       try {
-        cardIds = await Effect.runPromise(decodeEffect);
+        cardIds = decodeKcgDeckCode(content);
       } catch (error: unknown) {
-        if (error instanceof DeckCodeDecodeError) {
+        if (error instanceof Error) {
           await message.reply(
             `デッキコードのデコードに失敗しました: ${error.message}`,
           );
