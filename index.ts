@@ -7,21 +7,46 @@ const CHAR_MAP =
   "AIQYgow5BJRZhpx6CKSaiqy7DLTbjrz8EMUcks19FNVdlt2!GOWemu3?HPXfnv4/";
 const MAP1_EXPANSION = "eABCDEFGHI";
 const MAP2_EXPANSION = "pJKLMNOPQR";
+const VALID_CARD_ID_RE = /^(?:ex|prm|[A-R])[ASMD]-(?:[1-9]|[1-4][0-9]|50)$/;
 
 // 画像ロードを簡易キャッシュ
 const imageCache = new Map<string, Image>();
+const pendingLoads = new Map<string, Promise<Image>>();
 async function loadCardImage(cardId: string) {
   const abs = getAbsolutePath(path.join("cards", `${cardId}.webp`));
-  if (imageCache.has(abs)) return imageCache.get(abs)!;
-  try {
-    const img = await loadImage(abs);
-    imageCache.set(abs, img);
-    return img;
-  } catch {
-    const ph = await loadImage(getAbsolutePath("placeholder.webp"));
-    imageCache.set(abs, ph);
-    return ph;
-  }
+  const cached = imageCache.get(abs);
+  if (cached) return cached;
+
+  const inflight = pendingLoads.get(abs);
+  if (inflight) return await inflight;
+
+  const p = (async () => {
+    try {
+      const img = await loadImage(abs);
+      imageCache.set(abs, img);
+      return img;
+    } catch {
+      const phPath = getAbsolutePath("placeholder.webp");
+      const phCached = imageCache.get(phPath);
+      if (phCached) {
+        imageCache.set(abs, phCached);
+        return phCached;
+      }
+      try {
+        const ph = await loadImage(phPath);
+        imageCache.set(phPath, ph);
+        imageCache.set(abs, ph);
+        return ph;
+      } catch (e) {
+        console.error("Failed to load placeholder.webp", e);
+        throw e;
+      }
+    } finally {
+      pendingLoads.delete(abs);
+    }
+  })();
+  pendingLoads.set(abs, p);
+  return await p;
 }
 
 /**
@@ -356,16 +381,17 @@ client.on("messageCreate", async (message: Message) => {
     };
 
     // 妥当なカードIDのみを対象化
-    const VALID_CARD_ID_RE = /^(?:ex|prm|[A-R])[ASMD]-(?:[1-9]|[1-4][0-9]|50)$/;
     const validEntries = Array.from(cardCounts.entries()).filter(([cardId]) =>
       VALID_CARD_ID_RE.test(cardId),
     );
     const distinctValidCount = validEntries.length;
+    if (distinctValidCount === 0) {
+      await message.reply("有効なカードIDが見つかりませんでした。");
+      return;
+    }
 
-    const canvas = new Canvas(
-      DECK_IMAGE_CONSTANTS.CANVAS_WIDTH,
-      calculateCanvasHeight(distinctValidCount),
-    );
+    const canvasHeight = calculateCanvasHeight(distinctValidCount);
+    const canvas = new Canvas(DECK_IMAGE_CONSTANTS.CANVAS_WIDTH, canvasHeight);
     const ctx = canvas.getContext("2d");
 
     try {
@@ -379,7 +405,7 @@ client.on("messageCreate", async (message: Message) => {
         0,
         0,
         DECK_IMAGE_CONSTANTS.CANVAS_WIDTH,
-        calculateCanvasHeight(distinctValidCount),
+        canvasHeight,
       );
 
       ctx.textAlign = "center"; // テキストを中央揃え
@@ -406,16 +432,17 @@ client.on("messageCreate", async (message: Message) => {
       let cardsInRow = 0;
       ctx.font = "bold 36px ShipporiMincho";
 
-      for (const [cardId, count] of validEntries) {
-        let cardImage = await loadCardImage(cardId);
-        ctx.drawImage(cardImage, x, y, cardW, cardH);
-
-        // カード枚数の表示
+      const entriesWithImages = await Promise.all(
+        validEntries.map(async ([cardId, count]) => ({
+          count,
+          img: await loadCardImage(cardId),
+        })),
+      );
+      for (const { img, count } of entriesWithImages) {
+        ctx.drawImage(img, x, y, cardW, cardH);
         ctx.fillText(`${count}`, x + cardW / 2, y + cardH + 50);
-
         x += cardW + DECK_IMAGE_CONSTANTS.GRID_GAP_X;
         cardsInRow++;
-
         if (cardsInRow >= perRow) {
           x = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_X;
           y += cardH + DECK_IMAGE_CONSTANTS.GRID_GAP_Y;
