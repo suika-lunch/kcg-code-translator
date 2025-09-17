@@ -1,6 +1,6 @@
 import { Client, GatewayIntentBits, Message } from "discord.js";
 import { Effect, Data } from "effect";
-import { Canvas, loadImage, GlobalFonts } from "@napi-rs/canvas";
+import { Canvas, loadImage, GlobalFonts, Image } from "@napi-rs/canvas";
 import * as path from "path";
 
 // --- KCGデッキコード用定数 (deckCode.tsからコピー) ---
@@ -24,6 +24,22 @@ export class DeckCodeDecodeError extends Data.TaggedError(
   readonly notFoundIds?: readonly string[];
   readonly originalError?: unknown;
 }> {}
+
+// 画像ロードを簡易キャッシュ
+const imageCache = new Map<string, Image>();
+async function loadCardImage(cardId: string) {
+  const abs = getAbsolutePath(path.join("cards", `${cardId}.webp`));
+  if (imageCache.has(abs)) return imageCache.get(abs)!;
+  try {
+    const img = await loadImage(abs);
+    imageCache.set(abs, img);
+    return img;
+  } catch {
+    const ph = await loadImage(getAbsolutePath("placeholder.webp"));
+    imageCache.set(abs, ph);
+    return ph;
+  }
+}
 
 /**
  * KCG形式のデッキコードをデコード
@@ -383,16 +399,23 @@ client.on("messageCreate", async (message: Message) => {
       }
     };
 
+    // 妥当なカードIDのみを対象化
+    const VALID_CARD_ID_RE = /^(?:ex|prm|[A-R])[ASMD]-(?:[1-9]|[1-4][0-9]|50)$/;
+    const validEntries = Array.from(cardCounts.entries()).filter(([cardId]) =>
+      VALID_CARD_ID_RE.test(cardId),
+    );
+    const distinctValidCount = validEntries.length;
+
     const canvas = new Canvas(
       DECK_IMAGE_CONSTANTS.CANVAS_WIDTH,
-      calculateCanvasHeight(cardCounts.size),
+      calculateCanvasHeight(distinctValidCount),
     );
     const ctx = canvas.getContext("2d");
 
     try {
       // 背景画像の読み込みと描画
       const backgroundPath = getAbsolutePath(
-        getBackgroundImage(cardCounts.size),
+        getBackgroundImage(distinctValidCount),
       );
       const backgroundImage = await loadImage(backgroundPath);
       ctx.drawImage(
@@ -400,23 +423,13 @@ client.on("messageCreate", async (message: Message) => {
         0,
         0,
         DECK_IMAGE_CONSTANTS.CANVAS_WIDTH,
-        calculateCanvasHeight(cardCounts.size),
+        calculateCanvasHeight(distinctValidCount),
       );
 
       ctx.textAlign = "center"; // テキストを中央揃え
       ctx.fillStyle = "#353100"; // 文字色を調整
 
-      // 妥当なカードIDのみを対象化
-      const VALID_CARD_ID_RE =
-        /^(?:ex|prm|[A-R])[ASMD]-(?:[1-9]|[1-4][0-9]|50)$/;
-      const validEntries = Array.from(cardCounts.entries()).filter(
-        ([cardId]) => {
-          const ok = VALID_CARD_ID_RE.test(cardId);
-          if (!ok) console.warn(`Invalid cardId: ${cardId}. Skipping.`);
-          return ok;
-        },
-      );
-      // 合計枚数は有効IDのみで集計
+      // 合計枚数の集計
       const totalCardCount = validEntries.reduce(
         (sum, [, count]) => sum + count,
         0,
@@ -429,28 +442,16 @@ client.on("messageCreate", async (message: Message) => {
       ctx.fillText(totalCountText, canvas.width / 2, 240);
 
       // 各カードの画像と枚数の描画
-      const cardW = calculateCardWidth(cardCounts.size);
-      const cardH = calculateCardHeight(cardCounts.size);
-      const perRow = cardsPerRow(cardCounts.size);
+      const cardW = calculateCardWidth(distinctValidCount);
+      const cardH = calculateCardHeight(distinctValidCount);
+      const perRow = cardsPerRow(distinctValidCount);
       let x = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_X;
       let y = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_Y;
       let cardsInRow = 0;
       ctx.font = "bold 36px ShipporiMincho";
 
       for (const [cardId, count] of validEntries) {
-        const cardImagePath = getAbsolutePath(
-          path.join("cards", `${cardId}.webp`),
-        );
-
-        let cardImage;
-        try {
-          cardImage = await loadImage(cardImagePath);
-        } catch {
-          console.warn(
-            `Card image not found: ${cardImagePath}. Using placeholder.`,
-          );
-          cardImage = await loadImage(getAbsolutePath("placeholder.webp"));
-        }
+        let cardImage = await loadCardImage(cardId);
         ctx.drawImage(cardImage, x, y, cardW, cardH);
 
         // カード枚数の表示
