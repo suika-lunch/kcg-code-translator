@@ -12,6 +12,7 @@ const VALID_CARD_ID_RE = /^(?:ex|prm|[A-R])[ASMD]-(?:[1-9]|[1-4][0-9]|50)$/;
 // 画像ロードを簡易キャッシュ
 const imageCache = new Map<string, Image>();
 const pendingLoads = new Map<string, Promise<Image>>();
+const MAX_IMAGE_CACHE = 128;
 async function loadCardImage(cardId: string) {
   const abs = getAbsolutePath(path.join("cards", `${cardId}.webp`));
   const cached = imageCache.get(abs);
@@ -24,6 +25,10 @@ async function loadCardImage(cardId: string) {
     try {
       const img = await loadImage(abs);
       imageCache.set(abs, img);
+      if (imageCache.size > MAX_IMAGE_CACHE) {
+        const oldestKey = imageCache.keys().next().value;
+        if (oldestKey) imageCache.delete(oldestKey);
+      }
       return img;
     } catch {
       const phPath = getAbsolutePath("placeholder.webp");
