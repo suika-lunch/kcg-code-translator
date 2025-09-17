@@ -403,6 +403,9 @@ client.on("messageCreate", async (message: Message) => {
         calculateCanvasHeight(cardCounts.size),
       );
 
+      ctx.textAlign = "center"; // テキストを中央揃え
+      ctx.fillStyle = "#353100"; // 文字色を調整
+
       // カードの合計枚数を計算
       const totalCardCount = Array.from(cardCounts.values()).reduce(
         (sum, count) => sum + count,
@@ -410,21 +413,29 @@ client.on("messageCreate", async (message: Message) => {
       );
 
       // 合計枚数テキストの描画
-      ctx.fillStyle = "#353100"; // 文字色を調整
-      ctx.font = "bold 128px ShipporiMincho"; // フォントサイズを調整
-      ctx.textAlign = "center"; // 中央揃え
-
+      ctx.font = "bold 128px ShipporiMincho";
       const totalCountText = `合計枚数: ${totalCardCount}枚`;
 
       ctx.fillText(totalCountText, canvas.width / 2, 240);
 
       // 各カードの画像と枚数の描画
+      const cardW = calculateCardWidth(cardCounts.size);
+      const cardH = calculateCardHeight(cardCounts.size);
+      const perRow = cardsPerRow(cardCounts.size);
       let x = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_X;
       let y = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_Y;
       let cardsInRow = 0;
       ctx.font = "bold 36px ShipporiMincho";
 
       for (const [cardId, count] of cardCounts.entries()) {
+        // 期待形式: (ex|prm|A-R)(A|S|M|D)-(1..99)
+        const isValidId = /^(?:ex|prm|[A-R])[ASMD]-(?:[1-9]|[1-9][0-9])$/.test(
+          cardId,
+        );
+        if (!isValidId) {
+          console.warn(`Invalid cardId: ${cardId}. Skipping.`);
+          continue;
+        }
         const cardImagePath = getAbsolutePath(
           path.join("cards", `${cardId}.webp`),
         );
@@ -438,30 +449,17 @@ client.on("messageCreate", async (message: Message) => {
           );
           cardImage = await loadImage(getAbsolutePath("placeholder.webp"));
         }
-        ctx.drawImage(
-          cardImage,
-          x,
-          y,
-          calculateCardWidth(cardCounts.size),
-          calculateCardHeight(cardCounts.size),
-        );
+        ctx.drawImage(cardImage, x, y, cardW, cardH);
 
         // カード枚数の表示
-        ctx.fillText(
-          `${count}`,
-          x + calculateCardWidth(cardCounts.size) / 2,
-          y + calculateCardHeight(cardCounts.size) + 50,
-        );
+        ctx.fillText(`${count}`, x + cardW / 2, y + cardH + 50);
 
-        x +=
-          calculateCardWidth(cardCounts.size) + DECK_IMAGE_CONSTANTS.GRID_GAP_X;
+        x += cardW + DECK_IMAGE_CONSTANTS.GRID_GAP_X;
         cardsInRow++;
 
-        if (cardsInRow >= cardsPerRow(cardCounts.size)) {
+        if (cardsInRow >= perRow) {
           x = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_X;
-          y +=
-            calculateCardHeight(cardCounts.size) +
-            DECK_IMAGE_CONSTANTS.GRID_GAP_Y;
+          y += cardH + DECK_IMAGE_CONSTANTS.GRID_GAP_Y;
           cardsInRow = 0;
         }
       }
