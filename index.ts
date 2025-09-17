@@ -406,9 +406,19 @@ client.on("messageCreate", async (message: Message) => {
       ctx.textAlign = "center"; // テキストを中央揃え
       ctx.fillStyle = "#353100"; // 文字色を調整
 
-      // カードの合計枚数を計算
-      const totalCardCount = Array.from(cardCounts.values()).reduce(
-        (sum, count) => sum + count,
+      // 妥当なカードIDのみを対象化
+      const VALID_CARD_ID_RE =
+        /^(?:ex|prm|[A-R])[ASMD]-(?:[1-9]|[1-4][0-9]|50)$/;
+      const validEntries = Array.from(cardCounts.entries()).filter(
+        ([cardId]) => {
+          const ok = VALID_CARD_ID_RE.test(cardId);
+          if (!ok) console.warn(`Invalid cardId: ${cardId}. Skipping.`);
+          return ok;
+        },
+      );
+      // 合計枚数は有効IDのみで集計
+      const totalCardCount = validEntries.reduce(
+        (sum, [, count]) => sum + count,
         0,
       );
 
@@ -427,15 +437,7 @@ client.on("messageCreate", async (message: Message) => {
       let cardsInRow = 0;
       ctx.font = "bold 36px ShipporiMincho";
 
-      for (const [cardId, count] of cardCounts.entries()) {
-        // 期待形式: (ex|prm|A-R)(A|S|M|D)-(1..99)
-        const isValidId = /^(?:ex|prm|[A-R])[ASMD]-(?:[1-9]|[1-9][0-9])$/.test(
-          cardId,
-        );
-        if (!isValidId) {
-          console.warn(`Invalid cardId: ${cardId}. Skipping.`);
-          continue;
-        }
+      for (const [cardId, count] of validEntries) {
         const cardImagePath = getAbsolutePath(
           path.join("cards", `${cardId}.webp`),
         );
