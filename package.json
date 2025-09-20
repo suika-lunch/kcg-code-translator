@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "check": "oxlint && tsgo",
+    "check": "oxlint && tsc",
     "format": "prettier . --write --experimental-cli",
     "start": "bun run index.ts"
   },
@@ -13,9 +13,11 @@
     "discord.js": "^14.22.1"
   },
   "devDependencies": {
+    "@tsconfig/bun": "^1.0.8",
+    "@tsconfig/strictest": "^2.0.5",
     "@types/bun": "^1.2.22",
-    "@typescript/native-preview": "^7.0.0-dev.20250916.1",
     "oxlint": "^1.16.0",
-    "prettier": "^3.6.2"
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.2"
   }
 }

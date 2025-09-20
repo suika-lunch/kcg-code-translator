@@ -479,7 +479,7 @@ client.on("messageCreate", async (message: Message) => {
   }
 });
 
-const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
+const DISCORD_BOT_TOKEN = process.env["DISCORD_BOT_TOKEN"];
 
 if (!DISCORD_BOT_TOKEN) {
   console.error(
@@ -491,7 +491,7 @@ if (!DISCORD_BOT_TOKEN) {
 client.login(DISCORD_BOT_TOKEN);
 
 // koyeb用のWebサーバー
-const port = process.env.PORT || 3000;
+const port = process.env["PORT"] || 3000;
 console.log(
   `Launching Bun HTTP server on port: ${port}, url: http://0.0.0.0:${port} 🚀`,
 );
