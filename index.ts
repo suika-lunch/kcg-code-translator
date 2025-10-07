@@ -298,173 +298,152 @@ client.on("messageCreate", async (message: Message) => {
 
   const content = message.content;
 
-  // KCGデッキコードまたは多数のスラッシュを含むメッセージを処理
-  // スラッシュが50個以上ある場合は、KCGデッキコードではないがカードIDのリストとして解釈する
-  const slashCount = (content.match(/\//g) || []).length;
-  const isKcgDeckCode = content.startsWith("KCG-");
+  // --- 行単位のKCGデッキコード判定＆画像生成 ---
+  const lines = content
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  // 行単位: KCG- または スラッシュ数>=50 を対象行とする
+  const targetLines = lines
+    .map((l) => ({
+      line: l,
+      isKcg: l.startsWith("KCG-"),
+      slashCount: (l.match(/\//g) || []).length,
+    }))
+    .filter((x) => x.isKcg || x.slashCount >= 50);
 
-  if (slashCount >= 50 || isKcgDeckCode) {
-    console.log(`Received a relevant message: ${content}`);
+  if (targetLines.length > 0) {
+    console.log(
+      `Detected ${targetLines.length} target line(s) for rendering (KCG or slash list)`,
+    );
 
-    let cardIds: string[] = [];
-    if (isKcgDeckCode) {
-      try {
-        cardIds = decodeKcgDeckCode(content);
-      } catch (error: unknown) {
-        if (error instanceof Error) {
-          await message.reply(
-            `デッキコードのデコードに失敗しました: ${error.message}`,
+    // 各対象行ごとに画像を生成
+    const attachmentsPerLine = await Promise.all(
+      targetLines.map(async ({ line, isKcg }, idx) => {
+        try {
+          let cardIds: string[] = [];
+          if (isKcg) {
+            cardIds = decodeKcgDeckCode(line);
+          } else {
+            cardIds = line.split("/");
+          }
+
+          // 画像生成
+          const cardCounts = new Map<string, number>();
+          for (const cardId of cardIds) {
+            cardCounts.set(cardId, (cardCounts.get(cardId) || 0) + 1);
+          }
+
+          const validEntries = Array.from(cardCounts.entries()).filter(
+            ([cardId]) => VALID_CARD_ID_RE.test(cardId),
           );
-        } else {
-          await message.reply(`予期せぬエラーが発生しました: ${String(error)}`);
+          const distinctValidCount = validEntries.length;
+          if (distinctValidCount === 0) return null;
+
+          const canvasHeight =
+            distinctValidCount <= DECK_IMAGE_CONSTANTS.TWO_ROWS_THRESHOLD
+              ? DECK_IMAGE_CONSTANTS.CANVAS_HEIGHT_TWO_ROWS
+              : DECK_IMAGE_CONSTANTS.CANVAS_HEIGHT_THREE_ROWS;
+          const canvas = new Canvas(
+            DECK_IMAGE_CONSTANTS.CANVAS_WIDTH,
+            canvasHeight,
+          );
+          const ctx = canvas.getContext("2d");
+
+          const getBackgroundImage = (cardCount: number): string => {
+            if (cardCount <= DECK_IMAGE_CONSTANTS.TWO_ROWS_THRESHOLD) {
+              return "sheet2.webp";
+            } else if (cardCount <= DECK_IMAGE_CONSTANTS.THREE_ROWS_THRESHOLD) {
+              return "sheet.webp";
+            } else {
+              return "sheet_nogrid.webp";
+            }
+          };
+
+          const backgroundPath = getAbsolutePath(
+            getBackgroundImage(distinctValidCount),
+          );
+          const backgroundImage = await loadImage(backgroundPath);
+          ctx.drawImage(
+            backgroundImage,
+            0,
+            0,
+            DECK_IMAGE_CONSTANTS.CANVAS_WIDTH,
+            canvasHeight,
+          );
+
+          ctx.textAlign = "center";
+          ctx.fillStyle = "#353100";
+
+          const totalCardCount = validEntries.reduce(
+            (sum, [, count]) => sum + count,
+            0,
+          );
+
+          ctx.font = "bold 128px ShipporiMincho";
+          const totalCountText = `合計枚数: ${totalCardCount}枚`;
+          ctx.fillText(totalCountText, canvas.width / 2, 240);
+
+          const cardW =
+            distinctValidCount <= DECK_IMAGE_CONSTANTS.THREE_ROWS_THRESHOLD
+              ? DECK_IMAGE_CONSTANTS.CARD_WIDTH_LARGE
+              : DECK_IMAGE_CONSTANTS.CARD_WIDTH_SMALL;
+          const cardH =
+            distinctValidCount <= DECK_IMAGE_CONSTANTS.THREE_ROWS_THRESHOLD
+              ? DECK_IMAGE_CONSTANTS.CARD_HEIGHT_LARGE
+              : DECK_IMAGE_CONSTANTS.CARD_HEIGHT_SMALL;
+          const perRow =
+            distinctValidCount <= DECK_IMAGE_CONSTANTS.THREE_ROWS_THRESHOLD
+              ? DECK_IMAGE_CONSTANTS.CARDS_PER_ROW_LARGE
+              : DECK_IMAGE_CONSTANTS.CARDS_PER_ROW_SMALL;
+
+          let x = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_X;
+          let y = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_Y;
+          let cardsInRow = 0;
+          ctx.font = "bold 36px ShipporiMincho";
+
+          const entriesWithImages = await Promise.all(
+            validEntries.map(async ([cardId, count]) => ({
+              count,
+              img: await loadCardImage(cardId),
+            })),
+          );
+
+          for (const { img, count } of entriesWithImages) {
+            ctx.drawImage(img, x, y, cardW, cardH);
+            ctx.fillText(`${count}`, x + cardW / 2, y + cardH + 50);
+            x += cardW + DECK_IMAGE_CONSTANTS.GRID_GAP_X;
+            cardsInRow++;
+            if (cardsInRow >= perRow) {
+              x = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_X;
+              y += cardH + DECK_IMAGE_CONSTANTS.GRID_GAP_Y;
+              cardsInRow = 0;
+            }
+          }
+
+          return {
+            attachment: canvas.toBuffer("image/jpeg"),
+            name: `deck_${idx + 1}.jpg`,
+          };
+        } catch (error) {
+          console.error(`Failed to process target line #${idx + 1}:`, error);
+          return null;
         }
-        return;
+      }),
+    );
+
+    const attachments = attachmentsPerLine.filter(
+      (a): a is NonNullable<typeof a> => a !== null,
+    );
+
+    if (attachments.length > 0) {
+      // Discordの1メッセージ上限(添付10件)に収まるよう分割送信
+      for (let i = 0; i < attachments.length; i += 10) {
+        const chunk = attachments.slice(i, i + 10);
+        await message.reply({ files: chunk });
       }
     } else {
-      cardIds = content.split("/");
-    }
-
-    if (cardIds.length === 0) {
-      await message.reply("有効なカードIDが見つかりませんでした。");
-      return;
-    }
-
-    // カードIDとその枚数をカウント
-    const cardCounts = new Map<string, number>();
-    for (const cardId of cardIds) {
-      cardCounts.set(cardId, (cardCounts.get(cardId) || 0) + 1);
-    }
-
-    /**
-     * カード種類の数に基づいてキャンバス高さを計算
-     */
-    const calculateCanvasHeight = (cardCount: number): number => {
-      if (cardCount <= DECK_IMAGE_CONSTANTS.TWO_ROWS_THRESHOLD) {
-        return DECK_IMAGE_CONSTANTS.CANVAS_HEIGHT_TWO_ROWS;
-      }
-      return DECK_IMAGE_CONSTANTS.CANVAS_HEIGHT_THREE_ROWS;
-    };
-
-    /**
-     * カード種類の数に基づいてカード幅を計算
-     */
-    const calculateCardWidth = (cardCount: number): number => {
-      if (cardCount <= DECK_IMAGE_CONSTANTS.THREE_ROWS_THRESHOLD)
-        return DECK_IMAGE_CONSTANTS.CARD_WIDTH_LARGE;
-      return DECK_IMAGE_CONSTANTS.CARD_WIDTH_SMALL;
-    };
-
-    /**
-     * カード種類の数に基づいてカード高さを計算
-     */
-    const calculateCardHeight = (cardCount: number): number => {
-      if (cardCount <= DECK_IMAGE_CONSTANTS.THREE_ROWS_THRESHOLD)
-        return DECK_IMAGE_CONSTANTS.CARD_HEIGHT_LARGE;
-      return DECK_IMAGE_CONSTANTS.CARD_HEIGHT_SMALL;
-    };
-
-    /**
-     * カード種類の数に基づいて行あたりのカード数を計算
-     */
-    const cardsPerRow = (cardCount: number): number => {
-      if (cardCount <= DECK_IMAGE_CONSTANTS.THREE_ROWS_THRESHOLD)
-        return DECK_IMAGE_CONSTANTS.CARDS_PER_ROW_LARGE;
-      return DECK_IMAGE_CONSTANTS.CARDS_PER_ROW_SMALL;
-    };
-
-    /**
-     * カード種類の数に基づいて背景画像を返す
-     */
-    const getBackgroundImage = (cardCount: number): string => {
-      if (cardCount <= DECK_IMAGE_CONSTANTS.TWO_ROWS_THRESHOLD) {
-        return "sheet2.webp";
-      } else if (cardCount <= DECK_IMAGE_CONSTANTS.THREE_ROWS_THRESHOLD) {
-        return "sheet.webp";
-      } else {
-        return "sheet_nogrid.webp";
-      }
-    };
-
-    // 妥当なカードIDのみを対象化
-    const validEntries = Array.from(cardCounts.entries()).filter(([cardId]) =>
-      VALID_CARD_ID_RE.test(cardId),
-    );
-    const distinctValidCount = validEntries.length;
-    if (distinctValidCount === 0) {
-      await message.reply("有効なカードIDが見つかりませんでした。");
-      return;
-    }
-
-    const canvasHeight = calculateCanvasHeight(distinctValidCount);
-    const canvas = new Canvas(DECK_IMAGE_CONSTANTS.CANVAS_WIDTH, canvasHeight);
-    const ctx = canvas.getContext("2d");
-
-    try {
-      // 背景画像の読み込みと描画
-      const backgroundPath = getAbsolutePath(
-        getBackgroundImage(distinctValidCount),
-      );
-      const backgroundImage = await loadImage(backgroundPath);
-      ctx.drawImage(
-        backgroundImage,
-        0,
-        0,
-        DECK_IMAGE_CONSTANTS.CANVAS_WIDTH,
-        canvasHeight,
-      );
-
-      ctx.textAlign = "center"; // テキストを中央揃え
-      ctx.fillStyle = "#353100"; // 文字色を調整
-
-      // 合計枚数の集計
-      const totalCardCount = validEntries.reduce(
-        (sum, [, count]) => sum + count,
-        0,
-      );
-
-      // 合計枚数テキストの描画
-      ctx.font = "bold 128px ShipporiMincho";
-      const totalCountText = `合計枚数: ${totalCardCount}枚`;
-
-      ctx.fillText(totalCountText, canvas.width / 2, 240);
-
-      // 各カードの画像と枚数の描画
-      const cardW = calculateCardWidth(distinctValidCount);
-      const cardH = calculateCardHeight(distinctValidCount);
-      const perRow = cardsPerRow(distinctValidCount);
-      let x = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_X;
-      let y = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_Y;
-      let cardsInRow = 0;
-      ctx.font = "bold 36px ShipporiMincho";
-
-      const entriesWithImages = await Promise.all(
-        validEntries.map(async ([cardId, count]) => ({
-          count,
-          img: await loadCardImage(cardId),
-        })),
-      );
-      for (const { img, count } of entriesWithImages) {
-        ctx.drawImage(img, x, y, cardW, cardH);
-        ctx.fillText(`${count}`, x + cardW / 2, y + cardH + 50);
-        x += cardW + DECK_IMAGE_CONSTANTS.GRID_GAP_X;
-        cardsInRow++;
-        if (cardsInRow >= perRow) {
-          x = DECK_IMAGE_CONSTANTS.CANVAS_PADDING_X;
-          y += cardH + DECK_IMAGE_CONSTANTS.GRID_GAP_Y;
-          cardsInRow = 0;
-        }
-      }
-
-      const attachment = {
-        attachment: canvas.toBuffer("image/jpeg"),
-        name: "deck.jpg",
-      };
-      await message.reply({ files: [attachment] });
-    } catch (error) {
-      console.error("Error generating deck image:", error);
-      await message.reply(
-        "デッキ画像の生成中にエラーが発生しました。カードIDが正しいか確認してください。",
-      );
+      await message.reply("有効なデッキコードが見つかりませんでした。");
     }
   }
 
