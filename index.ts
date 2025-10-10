@@ -293,6 +293,11 @@ function normalizeToKatakanaNFKC(input: string): string {
   );
 }
 
+// 隠し画像判定用の正規化済みフレーズ
+const NORMALIZED_PHRASE_1 = normalizeToKatakanaNFKC("もういいじゃんか");
+const NORMALIZED_PHRASE_2 =
+  normalizeToKatakanaNFKC("上手く笑えなくていいじゃんか");
+
 client.once("clientReady", () => {
   GlobalFonts.registerFromPath(
     getAbsolutePath("ShipporiMincho-Bold.ttf"),
@@ -458,10 +463,9 @@ client.on("messageCreate", async (message: Message) => {
   // 隠し画像をリプライ
   const normalized = normalizeToKatakanaNFKC(content);
   const clodsireCount = (normalized.match(/ン/g) || []).length;
-  const phrase1 = normalizeToKatakanaNFKC("もういいじゃんか");
-  const phrase2 = normalizeToKatakanaNFKC("上手く笑えなくていいじゃんか");
   const hasEsukepu =
-    normalized.includes(phrase1) || normalized.includes(phrase2);
+    normalized.includes(NORMALIZED_PHRASE_1) ||
+    normalized.includes(NORMALIZED_PHRASE_2);
   if (clodsireCount >= 10 || hasEsukepu) {
     try {
       await message.reply({ files: [getAbsolutePath("secret.webp")] });
