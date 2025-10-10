@@ -285,6 +285,14 @@ const DECK_IMAGE_CONSTANTS = {
 const getAbsolutePath = (relativePath: string) =>
   path.join(process.cwd(), relativePath);
 
+// 日本語の全角/半角を正規化し、ひらがなをカタカナへ統一
+function normalizeToKatakanaNFKC(input: string): string {
+  const normalized = input.normalize("NFKC");
+  return normalized.replace(/[ぁ-ゖ]/g, (ch) =>
+    String.fromCharCode(ch.charCodeAt(0) + 0x60),
+  );
+}
+
 client.once("clientReady", () => {
   GlobalFonts.registerFromPath(
     getAbsolutePath("ShipporiMincho-Bold.ttf"),
@@ -448,8 +456,13 @@ client.on("messageCreate", async (message: Message) => {
   }
 
   // 隠し画像をリプライ
-  const clodsireCount = (content.match(/ン/g) || []).length;
-  if (clodsireCount >= 10) {
+  const normalized = normalizeToKatakanaNFKC(content);
+  const clodsireCount = (normalized.match(/ン/g) || []).length;
+  const phrase1 = normalizeToKatakanaNFKC("もういいじゃんか");
+  const phrase2 = normalizeToKatakanaNFKC("上手く笑えなくていいじゃんか");
+  const hasEsukepu =
+    normalized.includes(phrase1) || normalized.includes(phrase2);
+  if (clodsireCount >= 10 || hasEsukepu) {
     try {
       await message.reply({ files: [getAbsolutePath("secret.webp")] });
     } catch (error) {
