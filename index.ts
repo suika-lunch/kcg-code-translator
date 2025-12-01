@@ -316,6 +316,20 @@ client.on("messageCreate", async (message: Message) => {
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
+
+  // --- 公式デッキコード対応 ---
+  const newDeckCodeRegex = /^[a-zA-Z0-9]+_[a-zA-Z0-9]+_[a-zA-Z0-9]+$/;
+  const newDeckUrls = lines
+    .filter((l) => newDeckCodeRegex.test(l))
+    .map(
+      (code) =>
+        `https://tcg.kamitsubaki.jp/deck_system/deckimage/?deck_code=${code}`,
+    );
+
+  if (newDeckUrls.length > 0) {
+    await message.reply(newDeckUrls.join("\n"));
+  }
+
   // 行単位: KCG- または スラッシュ数>=50 を対象行とする
   const targetLines = lines
     .map((l) => ({
