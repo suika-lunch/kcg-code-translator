@@ -323,7 +323,7 @@ client.on("messageCreate", async (message: Message) => {
     .filter((l) => newDeckCodeRegex.test(l))
     .map(
       (code) =>
-        `https://tcg.kamitsubaki.jp/deck_system/deckimage/?deck_code=${code}`,
+        `https://tcg.kamitsubaki.jp/deck_system/deckimage/?deck_code=${code}\nhttps://tcg.kamitsubaki.jp/deck_system/subdeckimage/?deck_code=${code}`,
     );
 
   if (newDeckUrls.length > 0) {
