@@ -318,7 +318,7 @@ client.on("messageCreate", async (message: Message) => {
     .filter((l) => l.length > 0);
 
   // --- 公式デッキコード対応 ---
-  const newDeckCodeRegex = /^[a-zA-Z0-9]+_[a-zA-Z0-9]+_[a-zA-Z0-9]+$/;
+  const newDeckCodeRegex = /^[a-zA-Z0-9]{6}_[a-zA-Z0-9]{6}_[a-zA-Z0-9]{6}$/;
   const newDeckUrls = lines
     .filter((l) => newDeckCodeRegex.test(l))
     .map(
