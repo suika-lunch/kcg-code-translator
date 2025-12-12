@@ -311,9 +311,9 @@ client.on("messageCreate", async (message: Message) => {
 
   const content = message.content;
 
-  // --- 行単位のKCGデッキコード判定＆画像生成 ---
+  // --- 行単位またはパイプ区切りのKCGデッキコード判定＆画像生成 ---
   const lines = content
-    .split(/\r?\n/)
+    .split(/[\r\n|]+/)
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 
