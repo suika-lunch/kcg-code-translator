@@ -8,6 +8,7 @@
     "format": "prettier . --write --experimental-cli",
     "typecheck": "tsc -b",
     "check": "bun lint && bun format && bun typecheck",
+    "dev": "bun run index.ts",
     "start": "bun run index.ts"
   },
   "dependencies": {
@@ -17,9 +18,9 @@
   "devDependencies": {
     "@tsconfig/bun": "^1.0.10",
     "@tsconfig/strictest": "^2.0.8",
-    "@types/bun": "^1.3.6",
-    "oxlint": "^1.39.0",
-    "prettier": "^3.8.0",
+    "@types/bun": "^1.3.7",
+    "oxlint": "^1.42.0",
+    "prettier": "^3.8.1",
     "typescript": "^5.9.3"
   }
 }
