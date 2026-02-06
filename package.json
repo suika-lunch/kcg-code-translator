@@ -12,7 +12,7 @@
     "start": "bun run index.ts"
   },
   "dependencies": {
-    "@napi-rs/canvas": "^0.1.89",
+    "@napi-rs/canvas": "^0.1.90",
     "discord.js": "^14.25.1"
   },
   "devDependencies": {
